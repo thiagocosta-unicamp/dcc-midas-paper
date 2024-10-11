@@ -1,0 +1,11 @@
+pandas
+numpy
+statsmodels
+plotly
+arch
+ipywidgets
+scipy
+IPython
+beautifulsoup4
+requests
+yfinance
