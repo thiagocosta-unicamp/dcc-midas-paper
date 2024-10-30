@@ -183,7 +183,7 @@ def run_garch_on_return(rets, udata_list, model_parameters):
 start = datetime.datetime(2010,1,1)
 end = datetime.datetime(2020,12,30)
 
-tickers = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA', 'META', 'NVDA', 'JPM', 'JNJ']
+tickers = ['AAPL', 'AMZN', 'TSLA', 'META', 'NVDA', 'JPM', 'JNJ']
 
 close_prices = yf.download(tickers, start=start, end=end)['Adj Close']
 
