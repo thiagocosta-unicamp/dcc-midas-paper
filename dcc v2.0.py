@@ -14,7 +14,9 @@ import datetime  # For handling date and time
 import streamlit as st  # For creating web applications (interactive dashboards)
 import matplotlib.pyplot as plt  # For plotting graphs
 import pandas_datareader.data as web  # For downloading economic data (like CPI) from FRED
+import numdifftools as ndt 
 
+#%%Functions
 
 def garch_t_to_u(rets, res):
     """
@@ -149,6 +151,13 @@ def loglikelihood_garch(params, udata_list, K, MV, lambda_param):
         phi[i] = (lambda_param ** (i - 1))
 
     # Define long-term correlation calculation
+    
+    #MV = MV.values
+    # for i in range(1, K + 1):
+    #     m1 +=theta1 * phi[i] * MV[ : , i - 1]  
+    # lt_rho = m1
+    # lt_rho = (np.exp(2 * lt_rho) - 1) / (np.exp(2 * lt_rho) + 1)  # Fisher transformation
+
     lt_rho = 0.35  # This is hardcoded; in practice, it should be calculated
 
     q_11[0] = 1
@@ -217,7 +226,7 @@ def dcc_rc_x(params, udata_list, K, MV, lambda_param):
             z1[i] ** 2 - 2 * rho[i] * z1[i] * z2[i] + z2[i] ** 2
         )
 
-    return np.sum(garchln[1:]), q_11, q_22, q_12, rho
+    return np.sum(garchln[1:]), q_11, q_22, q_12, rho, garchln
 
 
 def calculate_criteria(log_likelihood, num_params, T):
@@ -230,7 +239,7 @@ def calculate_criteria(log_likelihood, num_params, T):
     
     return {'AIC': AIC, 'BIC': BIC, 'HQC': HQC}
 
-def QMLE(params, udata_list, K, MV, lambda_param):
+def QMLE(params, udata_list, K, MV, lambda_param, hessian, log_likelihood):
     """
     Estimate the parameters using QMLE (Quasi Maximum Likelihood Estimation), returning the log-likelihood, errors, and p-values.
     
@@ -240,13 +249,13 @@ def QMLE(params, udata_list, K, MV, lambda_param):
     K (int): Number of lags for macro variables.
     MV (np.ndarray): Macro variables data.
     lambda_param (float): Exponential weight decay parameter.
+    hessian (np.ndarray): The Hessian matrix (second derivative of log-likelihood).
+    log_likelihood (float): The log-likelihood value calculated from the model.
     
     Returns:
     dict: A dictionary containing the log-likelihood, parameter standard errors, and p-values.
     """
-    # Calculate log-likelihood using the function defined earlier
-    log_likelihood = loglikelihood_garch(params, udata_list, K, MV, lambda_param)
-    
+
     # Number of parameters in the model
     num_params = len(params)
     
@@ -255,11 +264,10 @@ def QMLE(params, udata_list, K, MV, lambda_param):
     
     # Calculate information criteria (AIC, BIC, HQC)
     criteria = calculate_criteria(log_likelihood, num_params, T)
-    
-    # Calculate standard errors for the parameters using Hessian matrix (approximated here)
-    # In practice, you could compute the Hessian matrix using numerical methods
-    # For simplicity, we're using random standard errors here
-    std_errors = np.random.random(num_params) * 0.1  # Example of simulated standard errors
+        
+    # Calculate standard errors (square root of diagonal elements of the inverse Hessian)
+    hessian_inv = np.linalg.inv(hessian)
+    std_errors = np.sqrt(np.diagonal(hessian_inv))
     
     # Calculate p-values using the normal distribution and standard errors
     p_values = 2 * (1 - norm.cdf(np.abs(params / std_errors)))  # Calculate p-values based on Z-scores
@@ -271,7 +279,8 @@ def QMLE(params, udata_list, K, MV, lambda_param):
         'HQC': criteria['HQC'],
         'params': params,
         'std_errors': std_errors,
-        'p_values': p_values
+        'p_values': p_values,  # Include gradient for transparency
+        'hessian': hessian     # Include Hessian for transparency
     }
 
 #%% Analysis
@@ -317,20 +326,21 @@ cons = ({'type': 'ineq', 'fun': lambda x: -x[0] - x[1] + 1})  # Constraints on a
 bnds = ((0, 0.5), (0, 0.9997))  # Bounds for alpha and beta parameters
 
 # Minimize the log-likelihood function to estimate the optimal parameters
-opt_out = minimize(loglikelihood_garch, initial_params, args=(udata_list, K, MV, lambda_param), bounds=bnds, constraints=cons)
+opt_out = minimize(loglikelihood_garch, initial_params, args=(udata_list, K, MV, lambda_param), bounds=bnds, constraints=cons, method = 'L-BFGS-B')
 
 # Extract optimized parameters and log-likelihood
 opt_params = opt_out.x
 opt_loglikehood = opt_out.fun
+opt_hessian = opt_out.hess_inv.todense()
 
 # Get the log-likelihood, q_11, q_22, q_12, and rho from the dcc_rc_x function
-log_likelihood, q_11, q_22, q_12, rho = dcc_rc_x(opt_params, udata_list, K, MV, lambda_param)
+log_likelihood, q_11, q_22, q_12, rho, garch_ln_matrix = dcc_rc_x(opt_params, udata_list, K, MV, lambda_param)
 
 # Calculate the information criteria (AIC, BIC, HQC) based on the optimized log-likelihood
 information_criteria = calculate_criteria(log_likelihood=opt_loglikehood, num_params=len(opt_params), T=len(udata_list[0]))
 
 # Estimate the model parameters using QMLE (Quasi Maximum Likelihood Estimation)
-results = QMLE(params=opt_params, udata_list=udata_list, K=K, MV=MV, lambda_param=lambda_param)
+results = QMLE(params=opt_params, udata_list=udata_list, K=K, MV=MV, lambda_param=lambda_param, hessian=opt_hessian, log_likelihood=log_likelihood)
 
 # Print the results: log-likelihood, AIC, BIC, HQC, parameters, standard errors, and p-values
 print("Log-Likelihood:", results['log_likelihood'])
